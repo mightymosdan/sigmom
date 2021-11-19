@@ -7,19 +7,20 @@ import plotly
 import plotly.express as px
 
 
-def create_pie_chart(df):
-    # Modify data frame to keep only positive significant moments
-    df = df[df["PANAS Score"] > 0]
+def sig_mom_source_pie_chart(df, positive_only=True):
+    # If positive_only, modify data frame to keep only positive significant moments
+    if positive_only:
+        df = df[df["PANAS Score"] > 0]
 
     # Create data frame for sources of significant moments and their counts
-    df_source_count = pd.DataFrame(
+    df = pd.DataFrame(
         df["Who/what caused this significant moment (e.g. Self, someone, something)?"]
         .value_counts()
         .reset_index()
     )
 
     # Rename columns of data frame
-    df_source_count = df_source_count.rename(
+    df = df.rename(
         columns={
             "index": "source",
             "Who/what caused this significant moment (e.g. Self, someone, something)?": "count",
@@ -27,13 +28,11 @@ def create_pie_chart(df):
     )
 
     # Combine all external sources
-    df_source_count["internal/external"] = np.where(
-        df_source_count["source"] == "Self", "internal", "external"
-    )
-    df_source_count = df_source_count.groupby("internal/external").sum().reset_index()
+    df["internal/external"] = np.where(df["source"] == "Self", "internal", "external")
+    df = df.groupby("internal/external").sum().reset_index()
 
     # Rename columns of data frame
-    df_source_count = df_source_count.rename(
+    df = df.rename(
         columns={
             "internal/external": "source",
         }
@@ -41,58 +40,91 @@ def create_pie_chart(df):
 
     # Create and show a pie chart that shows more details on mouse hover
     pie_source_count = px.pie(
-        data_frame=df_source_count,
+        data_frame=df,
         values="count",
         names="source",
         color="source",
-        title="Internal versus external sources",
+        title="Sources of Positive Significant Moments",
     )
     pie_source_count.show()
 
 
-def create_h_bar_chart(df):
-    # Create data frame for daily net PANAS scores
-    df_daily_score = df[["Date (dd/mm/yy)"] + ["PANAS Score"]]
-    df_daily_score = df_daily_score.groupby("Date (dd/mm/yy)").sum().reset_index()
+def sig_mom_panas_score_bar_chart(df, positive_only=True):
+    # Add a new column to specify whether the cause is internal or external
+    df["source"] = np.where(
+        df["Who/what caused this significant moment (e.g. Self, someone, something)?"]
+        == "Self",
+        "internal",
+        "external",
+    )
+
+    # If positive_only, modify data frame to keep only positive significant moments
+    if positive_only:
+        df = df[df["PANAS Score"] > 0]
+
+    # Get desired columns
+    df = df[["Date (dd/mm/yy)"] + ["source"] + ["PANAS Score"]]
+
+    # Sum up PANAS scores for each combination of day and source
+    df = df.groupby(["Date (dd/mm/yy)", "source"]).sum().reset_index()
 
     # Create and show a bar graph with a drop-down box for filtering dates
     dropdown_box = alt.binding_select(
-        options=list(df_daily_score["Date (dd/mm/yy)"]), name="Date (dd/mm/yy)"
+        options=list(dict.fromkeys(df["Date (dd/mm/yy)"])), name="Date (dd/mm/yy)"
     )
     selection = alt.selection_single(fields=["Date (dd/mm/yy)"], bind=dropdown_box)
     return (
-        alt.Chart(df_daily_score)
+        alt.Chart(df)
         .mark_bar()
         .encode(
-            x="PANAS Score",
-            y="Date (dd/mm/yy)",
-            color=alt.condition(selection, "Date (dd/mm/yy)", alt.value("lightgray")),
+            color=alt.condition(selection, "source", alt.value("lightgray")),
+            column="Date (dd/mm/yy)",
+            x="source",
+            y="PANAS Score",
         )
         .add_selection(selection)
     )
 
 
-def create_v_bar_chart(df):
-    # Create data frame that splits "Why did this situation cause a significant moment?, Relevant PANAS word" into two columns
-    df_split = df[
+def sig_mom_panas_word_bar_chart(df, positive_only=True):
+    # Add a new column to specify whether the cause is internal or external
+    df["source"] = np.where(
+        df["Who/what caused this significant moment (e.g. Self, someone, something)?"]
+        == "Self",
+        "internal",
+        "external",
+    )
+
+    # Split "Why did this situation cause a significant moment?, Relevant PANAS word" into two
+    df[
+        ["Why did this situation cause a significant moment?", "Relevant PANAS word"]
+    ] = df[
         "Why did this situation cause a significant moment?, Relevant PANAS word"
-    ].str.split(",", expand=True)
+    ].str.split(
+        ",", expand=True
+    )
 
-    # Create data frame of PANAS words and their counts
-    df_word_count = pd.DataFrame(df_split[1].value_counts().reset_index())
+    # If positive_only, modify data frame to keep only positive significant moments
+    if positive_only:
+        df = df[df["PANAS Score"] > 0]
 
-    # Rename columns of data frame
-    df_word_count = df_word_count.rename(columns={"index": "panas word", 1: "count"})
+    # Get desired columns
+    df = df[["source"] + ["Relevant PANAS word"]]
+
+    # Count instances of combination of source and relevant PANAS word
+    df = df.groupby(["source", "Relevant PANAS word"]).size().reset_index()
+    df = df.rename(columns={0: "count"})
 
     # Create and show a scatter plot with multi-selectable points
     multi_sel = alt.selection_multi()
     return (
-        alt.Chart(df_word_count)
+        alt.Chart(df)
         .mark_bar()
         .encode(
-            x=alt.X("panas word", sort="-y"),
+            color=alt.condition(multi_sel, "source", alt.value("lightgray")),
+            column="Relevant PANAS word",
+            x="source",
             y="count",
-            color=alt.condition(multi_sel, "panas word", alt.value("lightgray")),
         )
         .add_selection(multi_sel)
     )
